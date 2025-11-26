@@ -2,6 +2,8 @@
 
 ## 1. Descriere generală
 
+### Descriere in detaliu /doc/descriere_proiect_gym_secbd.txt
+
 Aplicația modelează o sală de fitness (GYM) cu:
 
 - membri (`GYM_MEMBERS`),

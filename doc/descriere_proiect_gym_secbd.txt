@@ -1,0 +1,257 @@
+Titlu proiect:
+Proiect Securitatea Bazelor de Date – Sistem de gestiune pentru o sală de fitness (GYM)
+
+1. Scopul aplicației
+
+Proiectul își propune modelarea și securizarea unei baze de date pentru gestionarea activității unei săli de fitness (GYM).
+Baza de date permite evidența membrilor, a antrenorilor, a abonamentelor, a contractelor și a claselor de antrenament, peste care sunt aplicate mecanisme de securitate studiate la laborator:
+
+criptarea datelor sensibile,
+
+asigurarea integrității cu ajutorul funcțiilor de hash,
+
+auditarea acțiunilor utilizatorilor,
+
+gestionarea utilizatorilor și a resurselor prin profile și cote.
+
+2. Context și motivație
+
+O sală de fitness modernă gestionează date personale sensibile (date de contact, CNP, abonamente, plăți), iar accesul la aceste informații trebuie controlat și monitorizat.
+Prin acest proiect se urmărește:
+
+definirea unui model de date simplu, dar realist, pentru un GYM;
+
+aplicarea tehnicilor de securitate oferite de Oracle Database (criptare, audit, profile);
+
+ilustrarea principalelor concepte de securitate a bazelor de date discutate la laborator, într-un scenariu diferit de schema clasică HR.
+
+3. Modelul de date
+
+Modelul de date include următoarele tabele principale:
+
+GYM_MEMBERS – stochează informațiile despre membrii sălii: nume, email, telefon, CNP, data înscrierii, stare (activ/inactiv).
+
+GYM_TRAINERS – stochează informații despre antrenori: nume, specializare.
+
+GYM_SUBSCRIPTIONS – definește tipurile de abonamente: denumire, durată în luni, preț.
+
+GYM_CONTRACTS – reprezintă contractele încheiate între membri și sală, pe baza unui tip de abonament (legătură între GYM_MEMBERS și GYM_SUBSCRIPTIONS).
+
+GYM_CLASSES – definește clasele de antrenament (ex.: Yoga, Strength), cu nivel de dificultate, antrenor responsabil și număr maxim de locuri.
+
+GYM_ENROLLMENTS – înscrierile membrilor la clase, incluzând data înscrierii și statusul prezenței (programat, prezent, absent).
+
+Pe lângă acestea, au fost definite tabele suplimentare pentru securitate:
+
+GYM_KEYS – gestionează cheile de criptare (cheie master și chei pe rând).
+
+GYM_MEMBERS_SECURE – stochează varianta criptată a unor atribute sensibile (ex.: telefonul membrilor), împreună cu referința la cheia folosită.
+
+GYM_CONTRACT_HASH – stochează valorile de hash pentru înregistrările din GYM_CONTRACTS.
+
+GYM_AUDIT_CONTRACTS – înregistrează evenimente de audit pentru operații critice asupra contractelor și abonamentelor.
+
+GYM_AUDIT_LOGON – înregistrează logările și delogările utilizatorilor în baza de date.
+
+4. Mecanisme de securitate implementate
+
+4.1. Criptarea datelor sensibile (DBMS_CRYPTO)
+Pentru protejarea datelor sensibile ale membrilor (de exemplu, numărul de telefon) s-au implementat:
+
+un tabel de chei GYM_KEYS, în care:
+
+se stochează o cheie master, generată cu DBMS_CRYPTO.RANDOMBYTES,
+
+se gestionează chei individuale pentru fiecare rând criptat;
+
+tabelul GYM_MEMBERS_SECURE, care conține:
+
+MEMBER_ID – referință către membru,
+
+PHONE_ENC – valoarea criptată a telefonului,
+
+ROW_KEY_ID – referință la cheia folosită.
+
+Criptarea se realizează cu un algoritm simetric AES (AES256, mod CBC, padding PKCS5), printr-o procedură care:
+
+citește cheia master;
+
+pentru fiecare membru generează o cheie de rând;
+
+construiește o cheie „hibridă” (master + row key);
+
+criptează telefonul și îl stochează în GYM_MEMBERS_SECURE.
+
+Decriptarea se face la cerere, printr-o funcție care:
+
+recuperează cheia master,
+
+recuperează cheia aferentă rândului,
+
+reconstruiește cheia hibridă,
+
+aplică DBMS_CRYPTO.DECRYPT și întoarce valoarea în clar.
+
+4.2. Asigurarea integrității cu funcții de hash (MD5)
+Pentru a detecta modificările neautorizate asupra contractelor, s-a definit:
+
+tabelul GYM_CONTRACT_HASH, care stochează, pentru fiecare contract:
+
+CONTRACT_ID,
+
+HASH_VALUE (valoare hash a câmpurilor importante),
+
+CREATED_AT (data calculului hash-ului);
+
+o funcție GYM_CONTRACT_MD5_ROW(...) care:
+
+construiește un șir textual din valorile contractului (CONTRACT_ID, MEMBER_ID, SUB_ID, START_DATE, END_DATE, STATUS),
+
+calculează hash-ul MD5 folosind DBMS_CRYPTO.HASH.
+
+Un trigger de tip AFTER INSERT OR UPDATE pe GYM_CONTRACTS calculează hash-ul pe baza valorilor :NEW și îl inserează sau actualizează în GYM_CONTRACT_HASH.
+Astfel, se poate verifica ulterior dacă o înregistrare a fost modificată (hash-ul salvat diferă de cel recalculat).
+
+4.3. Audit standard și triggere de audit
+Pentru auditul operațiilor asupra datelor, proiectul folosește:
+
+comenzi AUDIT la nivel de bază de date, de exemplu:
+
+auditarea operațiilor SELECT, INSERT, UPDATE, DELETE asupra GYM_MEMBERS;
+
+auditarea operațiilor nereușite asupra GYM_CONTRACTS;
+
+un tabel de audit GYM_AUDIT_CONTRACTS, în care sunt înregistrate:
+
+ștergeri de contracte (DELETE pe GYM_CONTRACTS);
+
+modificări ale prețurilor abonamentelor peste un anumit prag, printr-un trigger AFTER UPDATE OF PRICE ON GYM_SUBSCRIPTIONS (ex.: abonamente foarte scumpe);
+
+un tabel GYM_AUDIT_LOGON și două triggere de sistem:
+
+TRG_GYM_LOGON (trigger AFTER LOGON ON DATABASE), care inserează data logării, utilizatorul, ID-ul sesiunii și host-ul;
+
+TRG_GYM_LOGOFF (trigger BEFORE LOGOFF ON DATABASE), care actualizează câmpul LOGOUT_TIME pentru sesiunea respectivă.
+
+Aceste mecanisme permit monitorizarea activităților critice și urmărirea comportamentului utilizatorilor.
+
+4.4. Fine Grained Auditing (DBMS_FGA)
+Pentru auditul „fine grained” a fost configurată o politică FGA pe tabela GYM_CLASSES, cu următoarele caracteristici:
+
+se auditează numai operațiile UPDATE care modifică TRAINER_ID;
+
+auditul este condiționat de nivelul de dificultate: doar pentru clase ADVANCED.
+
+Politica este definită cu DBMS_FGA.ADD_POLICY, folosind parametrii:
+
+OBJECT_SCHEMA – schema proiectului,
+
+OBJECT_NAME – GYM_CLASSES,
+
+POLICY_NAME – nume semnificativ (ex.: FGA_ADVANCED_CLASSES),
+
+AUDIT_CONDITION – difficulty = 'ADVANCED',
+
+AUDIT_COLUMN – TRAINER_ID,
+
+STATEMENT_TYPES – UPDATE.
+
+Rezultatele sunt vizibile în vizualizările de audit FGA la nivelul bazei de date (de exemplu DBA_FGA_AUDIT_TRAIL, dacă utilizatorul are drepturi).
+
+5. Gestionarea utilizatorilor, profilelor și resurselor
+
+Pentru a simula roluri diferite în aplicație și pentru a controla utilizarea resurselor s-au definit mai mulți utilizatori Oracle, de exemplu:
+
+GYM_APP_ADMIN – administratorul aplicației;
+
+GYM_TRAINER1, GYM_TRAINER2 – antrenori;
+
+GYM_MEMBER1, GYM_MEMBER2, GYM_MEMBER3 – utilizatori de tip „membru”;
+
+GYM_REPORT – utilizator pentru rapoarte;
+
+GYM_GUEST – utilizator cu acces restrâns (vizitator).
+
+Au fost configurate:
+
+cote (quota) pe tablespace-ul USERS:
+
+GYM_APP_ADMIN – UNLIMITED (poate crea obiecte fără limită de spațiu în USERS);
+
+GYM_REPORT – cotă limitată (ex.: 10 MB);
+
+GYM_TRAINER1, GYM_TRAINER2 – cote mai mici (ex.: 2 MB);
+
+GYM_MEMBERx și GYM_GUEST – cotă 0 (nu pot crea tabele proprii);
+
+două profile de resurse:
+
+PROF_GYM_GUEST – profil pentru utilizatorul GYM_GUEST, cu limitări stricte:
+
+număr maxim de sesiuni simultane,
+
+timpi limita pentru IDLE_TIME și CONNECT_TIME;
+
+PROF_GYM_WORK – profil pentru utilizatorii „normali” (admin, antrenori, membri, report), cu:
+
+limită de CPU_PER_CALL,
+
+SESSIONS_PER_USER = 1,
+
+PASSWORD_LIFE_TIME redus,
+
+limită la numărul de încercări eșuate de autentificare (FAILED_LOGIN_ATTEMPTS).
+
+Profilele sunt asociate utilizatorilor prin comenzi ALTER USER ... PROFILE ....
+
+6. Tehnologii utilizate
+
+SGBD: Oracle Database 19c (container PDB: ORADB19P)
+
+Limbaj: SQL și PL/SQL
+
+Pachete Oracle:
+
+DBMS_CRYPTO – criptare AES și calcul de hash (MD5),
+
+DBMS_FGA – Fine Grained Auditing.
+
+Mecanisme Oracle suplimentare:
+
+triggere de tip ROW și STATEMENT,
+
+triggere la nivel de bază de date (LOGON/LOGOFF),
+
+audit standard (AUDIT),
+
+profile de resurse și cote de tablespace.
+
+7. Modul de rulare
+
+Baza de date se instalează și se testează în schema proiectului (ex.: GYM_SECBD), în următoarea ordine recomandată a scripturilor:
+
+creare tabele de bază (GYM_MEMBERS, GYM_TRAINERS, GYM_SUBSCRIPTIONS, GYM_CONTRACTS, GYM_CLASSES, GYM_ENROLLMENTS);
+
+creare tabele și obiecte pentru criptare și chei (GYM_KEYS, GYM_MEMBERS_SECURE, proceduri și funcții pentru criptare/decriptare);
+
+creare tabele și funcții pentru hash (GYM_CONTRACT_HASH, funcția GYM_CONTRACT_MD5_ROW și triggerul asociat);
+
+configurare audit standard, triggere de audit și politică FGA;
+
+creare utilizatori, profile și cotă de spațiu;
+
+inserare date de test (membri, antrenori, abonamente, clase, contracte) și rularea procedurilor de criptare.
+
+8. Concluzii
+
+Proiectul demonstrează, pe un scenariu concret (gestiunea unei săli de fitness), modul în care pot fi combinate mecanismele Oracle de securitate a datelor:
+
+criptarea datelor sensibile,
+
+verificarea integrității prin hash,
+
+auditarea operațiunilor critice,
+
+controlul accesului și al resurselor prin utilizatori și profile.
+
+În acest fel, baza de date nu este doar un simplu depozit de informații, ci un sistem care respectă principii de confidențialitate, integritate și responsabilitate (accountability), conform cerințelor moderne de securitate.
