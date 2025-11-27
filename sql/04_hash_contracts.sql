@@ -41,3 +41,21 @@ BEGIN
         INSERT (contract_id, hash_value, created_at)
         VALUES (:NEW.contract_id, v_hash, SYSDATE);
 END;
+
+CREATE OR REPLACE TRIGGER trg_gym_contract_hash
+AFTER INSERT OR UPDATE ON gym_contracts
+FOR EACH ROW
+DECLARE
+    v_hash RAW(2000);
+BEGIN
+    v_hash := gym_contract_md5(:NEW.contract_id);
+
+    MERGE INTO gym_contract_hash h
+    USING (SELECT :NEW.contract_id AS contract_id FROM dual) src
+    ON (h.contract_id = src.contract_id)
+    WHEN MATCHED THEN
+        UPDATE SET h.hash_value = v_hash, h.created_at = SYSDATE
+    WHEN NOT MATCHED THEN
+        INSERT (contract_id, hash_value, created_at)
+        VALUES (:NEW.contract_id, v_hash, SYSDATE);
+END;

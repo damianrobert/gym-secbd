@@ -1,0 +1,25 @@
+CREATE OR REPLACE TRIGGER trg_gym_logon
+AFTER LOGON ON SCHEMA
+DECLARE
+    PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    INSERT INTO gym_audit_logon(username, session_id, host, logon_time)
+    VALUES (SYS_CONTEXT('USERENV','SESSION_USER'),
+            SYS_CONTEXT('USERENV','SESSIONID'),
+            SYS_CONTEXT('USERENV','HOST'),
+            SYSDATE);
+    COMMIT;
+END;
+
+CREATE OR REPLACE TRIGGER trg_gym_logoff
+BEFORE LOGOFF ON SCHEMA
+DECLARE
+    PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    UPDATE gym_audit_logon
+       SET logout_time = SYSDATE
+     WHERE username   = SYS_CONTEXT('USERENV','SESSION_USER')
+       AND session_id = SYS_CONTEXT('USERENV','SESSIONID')
+       AND logout_time IS NULL;
+    COMMIT;
+END;

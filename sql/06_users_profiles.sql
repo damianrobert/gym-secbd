@@ -70,3 +70,16 @@ BEGIN
             SYSDATE);
     COMMIT;
 END;
+
+CREATE OR REPLACE TRIGGER trg_gym_logoff
+BEFORE LOGOFF ON DATABASE
+DECLARE
+    PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    UPDATE gym_audit_logon
+       SET logout_time = SYSDATE
+     WHERE username   = SYS_CONTEXT('USERENV','SESSION_USER')
+       AND session_id = SYS_CONTEXT('USERENV','SESSIONID')
+       AND logout_time IS NULL;
+    COMMIT;
+END;
